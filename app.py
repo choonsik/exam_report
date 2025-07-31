@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import io
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 # --- Configuration ---
 st.set_page_config(layout="wide", page_title="면접 심사 결과 리포트")
@@ -17,6 +18,19 @@ CATEGORY_COLS = {
 PASS_SCORE_THRESHOLD = 70
 REPORT_FORMATS = ['상세 리포트', '요약 리포트']
 
+# --- Excel Styling ---
+TITLE_FONT = Font(bold=True, size=14)
+HEADER_FONT = Font(bold=True, size=12)
+PASS_FONT = Font(color="0000FF", bold=True)
+PASS_FILL = PatternFill(start_color="DDEEFF", end_color="DDEEFF", fill_type="solid")
+FAIL_FONT = Font(color="FF0000", bold=True)
+FAIL_FILL = PatternFill(start_color="FFDDDD", end_color="FFDDDD", fill_type="solid")
+TABLE_HEADER_FONT = Font(bold=True)
+TABLE_HEADER_FILL = PatternFill(start_color="EAEAEA", end_color="EAEAEA", fill_type="solid")
+CENTER_ALIGN = Alignment(horizontal='center', vertical='center')
+THIN_BORDER = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+
+
 # --- Helper Functions ---
 
 def to_excel(df: pd.DataFrame) -> bytes:
@@ -27,8 +41,17 @@ def to_excel(df: pd.DataFrame) -> bytes:
     processed_data = output.getvalue()
     return processed_data
 
+def apply_styles_to_range(ws, cell_range, font=None, fill=None, alignment=None, border=None):
+    """주어진 범위의 셀에 스타일을 적용합니다."""
+    for row in ws[cell_range]:
+        for cell in row:
+            if font: cell.font = font
+            if fill: cell.fill = fill
+            if alignment: cell.alignment = alignment
+            if border: cell.border = border
+
 def write_individual_report_sheet(writer, candidate_name, all_df, report_format):
-    """주어진 ExcelWriter 객체에 선택된 양식으로 개별 후보자의 리포트 시트를 작성합니다."""
+    """주어진 ExcelWriter 객체에 선택된 양식으로 개별 후보자의 리포트 시트를 작성하고 서식을 적용합니다."""
     # 데이터 준비
     candidate_df = all_df[all_df['성명'] == candidate_name].copy()
     is_final_pass = all(candidate_df['Reviewer_Result'] == 'Pass')
@@ -53,6 +76,9 @@ def write_individual_report_sheet(writer, candidate_name, all_df, report_format)
     ])
     header_df.to_excel(writer, sheet_name=sheet_name, index=False, header=False, startrow=0)
 
+    # 워크시트 객체 가져오기
+    worksheet = writer.sheets[sheet_name]
+
     # 선택된 양식에 따라 내용 작성
     if report_format == '상세 리포트':
         # 점수 분석 데이터 준비
@@ -64,23 +90,51 @@ def write_individual_report_sheet(writer, candidate_name, all_df, report_format)
         comparison_df.index.name = "Category"
         
         # 점수 분석 쓰기
-        pd.DataFrame([{'': '📊 심사 점수 분석'}]).to_excel(writer, sheet_name=sheet_name, index=False, header=False, startrow=3)
+        worksheet['A4'] = '📊 심사 점수 분석'
         comparison_df.to_excel(writer, sheet_name=sheet_name, startrow=4)
         comments_start_row = 4 + len(comparison_df) + 3
     else: # 요약 리포트
         comments_start_row = 3
 
     # 코멘트 쓰기
-    pd.DataFrame([{'': '📝 심사위원 코멘트'}]).to_excel(writer, sheet_name=sheet_name, index=False, header=False, startrow=comments_start_row - 1)
+    worksheet[f'A{comments_start_row}'] = '📝 심사위원 코멘트'
     comments_df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=comments_start_row)
 
-    # 서식 조정
-    worksheet = writer.sheets[sheet_name]
+    # --- 서식 적용 ---
+    # 컬럼 너비 조정
     worksheet.column_dimensions['A'].width = 25
     worksheet.column_dimensions['B'].width = 80
     if report_format == '상세 리포트':
         worksheet.column_dimensions['C'].width = 15
         worksheet.column_dimensions['D'].width = 15
+
+    # 제목 서식
+    worksheet['A1'].font = TITLE_FONT
+    worksheet['B1'].font = TITLE_FONT
+    
+    # 최종 결과 서식
+    result_cell = worksheet['B2']
+    if final_result == "Pass":
+        result_cell.font = PASS_FONT
+        result_cell.fill = PASS_FILL
+    else:
+        result_cell.font = FAIL_FONT
+        result_cell.fill = FAIL_FILL
+    result_cell.border = THIN_BORDER
+
+    if report_format == '상세 리포트':
+        # 점수 분석 테이블 서식
+        worksheet['A4'].font = HEADER_FONT
+        score_table_range = f'A5:D{5 + len(comparison_df)}'
+        apply_styles_to_range(worksheet, score_table_range, border=THIN_BORDER)
+        apply_styles_to_range(worksheet, f'A5:D5', font=TABLE_HEADER_FONT, fill=TABLE_HEADER_FILL, alignment=CENTER_ALIGN)
+
+    # 코멘트 테이블 서식
+    worksheet[f'A{comments_start_row}'].font = HEADER_FONT
+    comment_table_range = f'A{comments_start_row + 1}:B{comments_start_row + 1 + len(comments_df)}'
+    apply_styles_to_range(worksheet, comment_table_range, border=THIN_BORDER)
+    apply_styles_to_range(worksheet, f'A{comments_start_row + 1}:B{comments_start_row + 1}', font=TABLE_HEADER_FONT, fill=TABLE_HEADER_FILL, alignment=CENTER_ALIGN)
+
 
 def generate_report_file_content(candidate_name, all_df, report_format):
     """선택된 후보자의 상세 리포트 내용을 Excel 파일(bytes)로 생성합니다."""
@@ -108,8 +162,27 @@ def generate_overall_report_file_content(all_df, report_format):
         summary_df = pd.DataFrame(summary_data)
         summary_df.to_excel(writer, sheet_name='전체 요약', index=False)
         worksheet = writer.sheets['전체 요약']
+        
+        # 요약 시트 서식 적용
         worksheet.column_dimensions['A'].width = 15
         worksheet.column_dimensions['B'].width = 15
+        for col_letter in 'CDEF':
+            worksheet.column_dimensions[col_letter].width = 18
+        
+        summary_range = f'A1:F{len(summary_df) + 1}'
+        apply_styles_to_range(worksheet, summary_range, border=THIN_BORDER)
+        apply_styles_to_range(worksheet, 'A1:F1', font=TABLE_HEADER_FONT, fill=TABLE_HEADER_FILL, alignment=CENTER_ALIGN)
+        
+        # Pass/Fail 서식
+        for row_idx, row in enumerate(summary_df.itertuples(), 2):
+            result_cell = worksheet[f'B{row_idx}']
+            if row._2 == "Pass":
+                result_cell.font = PASS_FONT
+                result_cell.fill = PASS_FILL
+            else:
+                result_cell.font = FAIL_FONT
+                result_cell.fill = FAIL_FILL
+
 
         # 2. 후보자별 개별 리포트 시트 생성
         for name in candidate_names:
