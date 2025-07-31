@@ -15,6 +15,7 @@ CATEGORY_COLS = {
 }
 
 PASS_SCORE_THRESHOLD = 70
+REPORT_FORMATS = ['상세 리포트', '요약 리포트']
 
 # --- Helper Functions ---
 
@@ -26,19 +27,12 @@ def to_excel(df: pd.DataFrame) -> bytes:
     processed_data = output.getvalue()
     return processed_data
 
-def write_individual_report_sheet(writer, candidate_name, all_df):
-    """주어진 ExcelWriter 객체에 개별 후보자의 리포트 시트를 작성합니다."""
+def write_individual_report_sheet(writer, candidate_name, all_df, report_format):
+    """주어진 ExcelWriter 객체에 선택된 양식으로 개별 후보자의 리포트 시트를 작성합니다."""
     # 데이터 준비
     candidate_df = all_df[all_df['성명'] == candidate_name].copy()
     is_final_pass = all(candidate_df['Reviewer_Result'] == 'Pass')
     final_result = "Pass" if is_final_pass else "Fail"
-
-    candidate_scores = candidate_df[list(CATEGORY_COLS.keys()) + ['총점']].mean().rename("후보자 점수")
-    overall_avg = all_df[list(CATEGORY_COLS.keys()) + ['총점']].mean().rename("전체 평균")
-    passer_df = all_df[all_df['Reviewer_Result'] == 'Pass']
-    passer_avg = passer_df[list(CATEGORY_COLS.keys()) + ['총점']].mean().rename("합격자 평균") if not passer_df.empty else pd.Series(0, index=candidate_scores.index, name="합격자 평균")
-    comparison_df = pd.concat([candidate_scores, overall_avg, passer_avg], axis=1)
-    comparison_df.index.name = "Category"
 
     comments_data = []
     candidate_df = candidate_df.reset_index(drop=True)
@@ -59,12 +53,24 @@ def write_individual_report_sheet(writer, candidate_name, all_df):
     ])
     header_df.to_excel(writer, sheet_name=sheet_name, index=False, header=False, startrow=0)
 
-    # 점수 분석 쓰기
-    pd.DataFrame([{'': '📊 심사 점수 분석'}]).to_excel(writer, sheet_name=sheet_name, index=False, header=False, startrow=3)
-    comparison_df.to_excel(writer, sheet_name=sheet_name, startrow=4)
+    # 선택된 양식에 따라 내용 작성
+    if report_format == '상세 리포트':
+        # 점수 분석 데이터 준비
+        candidate_scores = candidate_df[list(CATEGORY_COLS.keys()) + ['총점']].mean().rename("후보자 점수")
+        overall_avg = all_df[list(CATEGORY_COLS.keys()) + ['총점']].mean().rename("전체 평균")
+        passer_df = all_df[all_df['Reviewer_Result'] == 'Pass']
+        passer_avg = passer_df[list(CATEGORY_COLS.keys()) + ['총점']].mean().rename("합격자 평균") if not passer_df.empty else pd.Series(0, index=candidate_scores.index, name="합격자 평균")
+        comparison_df = pd.concat([candidate_scores, overall_avg, passer_avg], axis=1)
+        comparison_df.index.name = "Category"
+        
+        # 점수 분석 쓰기
+        pd.DataFrame([{'': '📊 심사 점수 분석'}]).to_excel(writer, sheet_name=sheet_name, index=False, header=False, startrow=3)
+        comparison_df.to_excel(writer, sheet_name=sheet_name, startrow=4)
+        comments_start_row = 4 + len(comparison_df) + 3
+    else: # 요약 리포트
+        comments_start_row = 3
 
     # 코멘트 쓰기
-    comments_start_row = 4 + len(comparison_df) + 3
     pd.DataFrame([{'': '📝 심사위원 코멘트'}]).to_excel(writer, sheet_name=sheet_name, index=False, header=False, startrow=comments_start_row - 1)
     comments_df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=comments_start_row)
 
@@ -72,17 +78,18 @@ def write_individual_report_sheet(writer, candidate_name, all_df):
     worksheet = writer.sheets[sheet_name]
     worksheet.column_dimensions['A'].width = 25
     worksheet.column_dimensions['B'].width = 80
-    worksheet.column_dimensions['C'].width = 15
-    worksheet.column_dimensions['D'].width = 15
+    if report_format == '상세 리포트':
+        worksheet.column_dimensions['C'].width = 15
+        worksheet.column_dimensions['D'].width = 15
 
-def generate_report_file_content(candidate_name, all_df):
+def generate_report_file_content(candidate_name, all_df, report_format):
     """선택된 후보자의 상세 리포트 내용을 Excel 파일(bytes)로 생성합니다."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        write_individual_report_sheet(writer, candidate_name, all_df)
+        write_individual_report_sheet(writer, candidate_name, all_df, report_format)
     return output.getvalue()
 
-def generate_overall_report_file_content(all_df):
+def generate_overall_report_file_content(all_df, report_format):
     """전체 후보자에 대한 요약 및 개별 리포트를 포함하는 Excel 파일을 생성합니다."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -106,7 +113,7 @@ def generate_overall_report_file_content(all_df):
 
         # 2. 후보자별 개별 리포트 시트 생성
         for name in candidate_names:
-            write_individual_report_sheet(writer, name, all_df)
+            write_individual_report_sheet(writer, name, all_df, report_format)
             
     return output.getvalue()
 
@@ -204,17 +211,19 @@ def generate_candidate_report(candidate_name, all_df):
     st.header(f"👤 후보자 리포트: {candidate_name}")
     
     # 최종 결과와 다운로드 버튼을 나란히 배치
-    col1, col2 = st.columns([3, 1])
+    col1, col2, col3 = st.columns([2, 2, 1])
     with col1:
         result_color = "blue" if final_result == "Pass" else "red"
         st.subheader(f"최종 결과: :{result_color}[{final_result}]")
     with col2:
+        selected_format = st.radio("리포트 양식 선택", REPORT_FORMATS, horizontal=True, key=f"individual_report_format_{candidate_name}")
+    with col3:
         st.write("") # 세로 정렬을 위한 빈 공간
-        report_bytes = generate_report_file_content(candidate_name, all_df)
+        report_bytes = generate_report_file_content(candidate_name, all_df, selected_format)
         st.download_button(
-            label="📥 리포트 다운로드 (Excel)",
+            label="📥 리포트 다운로드",
             data=report_bytes,
-            file_name=f"{candidate_name}_면접결과_리포트.xlsx",
+            file_name=f"{candidate_name}_면접결과_{selected_format}.xlsx",
             mime="application/vnd.ms-excel"
         )
 
@@ -373,12 +382,16 @@ if uploaded_files:
             summary_df = pd.DataFrame(summary_data)
             st.dataframe(summary_df.style.format("{:.2f}", subset=list(CATEGORY_COLS.keys()) + ['총점']), use_container_width=True, hide_index=True)
             
-            st.download_button(
-                label="📥 전체 리포트 다운로드 (Excel)",
-                data=generate_overall_report_file_content(processed_df),
-                file_name="interview_overall_report.xlsx",
-                mime="application/vnd.ms-excel"
-            )
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                overall_report_format = st.radio("리포트 양식 선택", REPORT_FORMATS, horizontal=True, key="overall_report_format")
+            with col2:
+                st.download_button(
+                    label="📥 전체 리포트 다운로드",
+                    data=generate_overall_report_file_content(processed_df, overall_report_format),
+                    file_name=f"interview_overall_{overall_report_format}.xlsx",
+                    mime="application/vnd.ms-excel"
+                )
 
 
 else:
