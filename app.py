@@ -26,10 +26,8 @@ def to_excel(df: pd.DataFrame) -> bytes:
     processed_data = output.getvalue()
     return processed_data
 
-def generate_report_file_content(candidate_name, all_df):
-    """선택된 후보자의 상세 리포트 내용을 Excel 파일(bytes)로 생성합니다."""
-    output = io.BytesIO()
-    
+def write_individual_report_sheet(writer, candidate_name, all_df):
+    """주어진 ExcelWriter 객체에 개별 후보자의 리포트 시트를 작성합니다."""
     # 데이터 준비
     candidate_df = all_df[all_df['성명'] == candidate_name].copy()
     is_final_pass = all(candidate_df['Reviewer_Result'] == 'Pass')
@@ -51,33 +49,65 @@ def generate_report_file_content(candidate_name, all_df):
         comments_data.append({'심사위원': f"{reviewer_label} {result_label}", '코멘트': comment})
     comments_df = pd.DataFrame(comments_data)
 
-    # 엑셀 파일 생성
+    # 엑셀 시트 생성
+    sheet_name = f'{candidate_name} 리포트'
+    
+    # 헤더 정보 쓰기
+    header_df = pd.DataFrame([
+        {'항목': '후보자 리포트', ' ': candidate_name},
+        {'항목': '최종 결과', ' ': final_result}
+    ])
+    header_df.to_excel(writer, sheet_name=sheet_name, index=False, header=False, startrow=0)
+
+    # 점수 분석 쓰기
+    pd.DataFrame([{'': '📊 심사 점수 분석'}]).to_excel(writer, sheet_name=sheet_name, index=False, header=False, startrow=3)
+    comparison_df.to_excel(writer, sheet_name=sheet_name, startrow=4)
+
+    # 코멘트 쓰기
+    comments_start_row = 4 + len(comparison_df) + 3
+    pd.DataFrame([{'': '📝 심사위원 코멘트'}]).to_excel(writer, sheet_name=sheet_name, index=False, header=False, startrow=comments_start_row - 1)
+    comments_df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=comments_start_row)
+
+    # 서식 조정
+    worksheet = writer.sheets[sheet_name]
+    worksheet.column_dimensions['A'].width = 25
+    worksheet.column_dimensions['B'].width = 80
+    worksheet.column_dimensions['C'].width = 15
+    worksheet.column_dimensions['D'].width = 15
+
+def generate_report_file_content(candidate_name, all_df):
+    """선택된 후보자의 상세 리포트 내용을 Excel 파일(bytes)로 생성합니다."""
+    output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        sheet_name = f'{candidate_name} 리포트'
+        write_individual_report_sheet(writer, candidate_name, all_df)
+    return output.getvalue()
+
+def generate_overall_report_file_content(all_df):
+    """전체 후보자에 대한 요약 및 개별 리포트를 포함하는 Excel 파일을 생성합니다."""
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # 1. 전체 요약 시트 생성
+        summary_data = []
+        candidate_names = all_df['성명'].unique()
+        for name in candidate_names:
+            candidate_df = all_df[all_df['성명'] == name]
+            is_final_pass = all(candidate_df['Reviewer_Result'] == 'Pass')
+            final_result = "Pass" if is_final_pass else "Fail"
+            avg_scores = candidate_df[list(CATEGORY_COLS.keys()) + ['총점']].mean()
+            summary_row = {'성명': name, '최종 결과': final_result}
+            summary_row.update(avg_scores)
+            summary_data.append(summary_row)
         
-        # 헤더 정보 쓰기
-        header_df = pd.DataFrame([
-            {'항목': '후보자 리포트', ' ': candidate_name},
-            {'항목': '최종 결과', ' ': final_result}
-        ])
-        header_df.to_excel(writer, sheet_name=sheet_name, index=False, header=False, startrow=0)
+        summary_df = pd.DataFrame(summary_data)
+        summary_df.to_excel(writer, sheet_name='전체 요약', index=False)
+        worksheet = writer.sheets['전체 요약']
+        worksheet.column_dimensions['A'].width = 15
+        worksheet.column_dimensions['B'].width = 15
 
-        # 점수 분석 쓰기
-        pd.DataFrame([{'': '📊 심사 점수 분석'}]).to_excel(writer, sheet_name=sheet_name, index=False, header=False, startrow=3)
-        comparison_df.to_excel(writer, sheet_name=sheet_name, startrow=4)
-
-        # 코멘트 쓰기
-        comments_start_row = 4 + len(comparison_df) + 3
-        pd.DataFrame([{'': '📝 심사위원 코멘트'}]).to_excel(writer, sheet_name=sheet_name, index=False, header=False, startrow=comments_start_row - 1)
-        comments_df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=comments_start_row)
-
-        # 서식 조정
-        worksheet = writer.sheets[sheet_name]
-        worksheet.column_dimensions['A'].width = 25
-        worksheet.column_dimensions['B'].width = 80
-        worksheet.column_dimensions['C'].width = 15
-        worksheet.column_dimensions['D'].width = 15
-
+        # 2. 후보자별 개별 리포트 시트 생성
+        for name in candidate_names:
+            write_individual_report_sheet(writer, name, all_df)
+            
     return output.getvalue()
 
 
@@ -228,6 +258,7 @@ st.markdown("""
 1.  **파일 업로드**: '평가표' 시트가 포함된 엑셀 파일들을 업로드하세요.
 2.  **데이터 확인**: '통합 결과 확인' 탭에서 취합된 데이터를 확인하고 검증 문제를 확인하세요.
 3.  **리포트 생성**: '후보자 리포트' 탭에서 특정 후보자를 선택하여 상세 리포트를 확인하고 다운로드하세요.
+4.  **전체 리포트**: '전체 후보자 리포트' 탭에서 모든 후보자의 결과를 요약하고 전체 리포트를 다운로드하세요.
 """)
 
 uploaded_files = st.file_uploader(
@@ -242,7 +273,7 @@ if uploaded_files:
 
     if not processed_df.empty:
         # 탭 생성
-        tab1, tab2 = st.tabs(["📊 통합 결과 확인", "📄 후보자 리포트"])
+        tab1, tab2, tab3 = st.tabs(["📊 통합 결과 확인", "📄 후보자 리포트", "🗂️ 전체 후보자 리포트"])
 
         with tab1:
             st.header("통합 심사 결과")
@@ -301,12 +332,12 @@ if uploaded_files:
             if selected_result != '전체' and 'Reviewer_Result' in filtered_df.columns:
                 filtered_df = filtered_df[filtered_df['Reviewer_Result'] == selected_result]
 
-            st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+            st.dataframe(filtered_df.drop(columns=['Result_Mismatch'], errors='ignore'), use_container_width=True, hide_index=True)
 
             # --- 다운로드 버튼 ---
             st.download_button(
                 label="📥 엑셀 파일로 다운로드",
-                data=to_excel(filtered_df),
+                data=to_excel(filtered_df.drop(columns=['Result_Mismatch'], errors='ignore')),
                 file_name="interview_results_combined.xlsx",
                 mime="application/vnd.ms-excel"
             )
@@ -324,5 +355,31 @@ if uploaded_files:
 
             if selected_candidate:
                 generate_candidate_report(selected_candidate, processed_df)
+        
+        with tab3:
+            st.header("전체 후보자 리포트 요약")
+
+            summary_data = []
+            candidate_names = sorted(processed_df['성명'].unique())
+            for name in candidate_names:
+                candidate_df = processed_df[processed_df['성명'] == name]
+                is_final_pass = all(candidate_df['Reviewer_Result'] == 'Pass')
+                final_result = "Pass" if is_final_pass else "Fail"
+                avg_scores = candidate_df[list(CATEGORY_COLS.keys()) + ['총점']].mean()
+                summary_row = {'성명': name, '최종 결과': final_result}
+                summary_row.update(avg_scores)
+                summary_data.append(summary_row)
+            
+            summary_df = pd.DataFrame(summary_data)
+            st.dataframe(summary_df.style.format("{:.2f}", subset=list(CATEGORY_COLS.keys()) + ['총점']), use_container_width=True, hide_index=True)
+            
+            st.download_button(
+                label="📥 전체 리포트 다운로드 (Excel)",
+                data=generate_overall_report_file_content(processed_df),
+                file_name="interview_overall_report.xlsx",
+                mime="application/vnd.ms-excel"
+            )
+
+
 else:
     st.info("심사 결과 분석을 시작하려면 엑셀 파일을 업로드해주세요.")
