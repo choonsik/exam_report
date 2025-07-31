@@ -86,8 +86,8 @@ def write_individual_report_sheet(writer, candidate_name, all_df, report_format)
     # '제출용 양식' 로직
     if report_format == '제출용 양식':
         # 데이터프레임을 만들지 않고 빈 시트에 직접 작성
-        worksheet = writer.book.create_sheet(title=sheet_name)
-        writer.sheets[sheet_name] = worksheet
+        pd.DataFrame().to_excel(writer, sheet_name=sheet_name)
+        worksheet = writer.sheets[sheet_name]
 
         # 데이터 계산
         candidate_scores = candidate_df[list(CATEGORY_COLS.keys()) + ['총점']].mean()
@@ -136,11 +136,14 @@ def write_individual_report_sheet(writer, candidate_name, all_df, report_format)
             worksheet.merge_cells(f'C{i}:E{i}')
 
         # 스타일 적용
+        apply_styles_to_range(worksheet, 'D1', alignment=CENTER_ALIGN)
+        apply_styles_to_range(worksheet, 'E1', alignment=CENTER_ALIGN)
         apply_styles_to_range(worksheet, 'B5:E9', border=THIN_BORDER)
         apply_styles_to_range(worksheet, 'B11:E13', border=THIN_BORDER)
         apply_styles_to_range(worksheet, 'B5:E5', font=TABLE_HEADER_FONT, alignment=CENTER_ALIGN)
-        apply_styles_to_range(worksheet, 'C3', alignment=CENTER_ALIGN)
-
+        
+        # C3 셀 서식 적용
+        apply_styles_to_range(worksheet, 'C3', alignment=CENTER_ALIGN, border=THIN_BORDER)
         if final_result == "Pass":
             apply_styles_to_range(worksheet, 'C3', font=PASS_FONT, fill=PASS_FILL)
         else:
