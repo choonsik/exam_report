@@ -98,8 +98,8 @@ def write_individual_report_sheet(writer, candidate_name, all_df, report_format)
         comments = candidate_df['총평'].fillna('코멘트 없음').tolist()
 
         # 셀에 데이터 쓰기
-        worksheet['E1'] = "이름"
-        worksheet['F1'] = candidate_name
+        worksheet['D1'] = "이름"
+        worksheet['E1'] = candidate_name
         worksheet['B3'] = "Result"
         worksheet['C3'] = final_result
         
