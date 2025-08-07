@@ -31,6 +31,7 @@ TABLE_HEADER_FONT = Font(bold=True)
 TABLE_HEADER_FILL = PatternFill(start_color="EAEAEA", end_color="EAEAEA", fill_type="solid")
 CENTER_ALIGN = Alignment(horizontal='center', vertical='center')
 LEFT_ALIGN = Alignment(horizontal='left', vertical='center')
+WRAP_LEFT_ALIGN = Alignment(horizontal='left', vertical='top', wrap_text=True)
 THIN_BORDER = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
 BOX_BORDER = Border(left=Side(style='medium'), right=Side(style='medium'), top=Side(style='medium'), bottom=Side(style='medium'))
 
@@ -159,8 +160,7 @@ def write_individual_report_sheet(writer, candidate_name, all_df, report_format)
         result_label = f"(Pass)" if row['Reviewer_Result'] == 'Pass' else f"(Fail)"
         comment = row.get('총평', '코멘트 없음')
         comments_data.append({'심사위원': f"{reviewer_label} {result_label}", '코멘트': comment})
-    comments_df = pd.DataFrame(comments_data)
-
+    
     header_df = pd.DataFrame([{'항목': '후보자 리포트', ' ': candidate_name}, {'항목': '최종 결과', ' ': final_result}])
     header_df.to_excel(writer, sheet_name=sheet_name, index=False, header=False, startrow=0)
     worksheet = writer.sheets[sheet_name]
@@ -180,13 +180,29 @@ def write_individual_report_sheet(writer, candidate_name, all_df, report_format)
         comments_start_row = 3
 
     worksheet[f'A{comments_start_row}'] = '📝 심사위원 코멘트'
-    comments_df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=comments_start_row)
-    worksheet.column_dimensions['A'].width = 25
-    worksheet.column_dimensions['B'].width = 80
-    if report_format == '상세 리포트':
-        worksheet.column_dimensions['C'].width = 15
-        worksheet.column_dimensions['D'].width = 15
+    
+    # 코멘트 헤더 수동 작성 및 병합
+    header_row = comments_start_row + 1
+    worksheet[f'A{header_row}'] = '심사위원'
+    worksheet[f'B{header_row}'] = '코멘트'
+    worksheet.merge_cells(f'B{header_row}:D{header_row}')
 
+    # 코멘트 데이터 수동 작성 및 병합
+    for i, comment_item in enumerate(comments_data):
+        current_row = header_row + 1 + i
+        worksheet[f'A{current_row}'] = comment_item['심사위원']
+        worksheet[f'B{current_row}'] = comment_item['코멘트']
+        worksheet.merge_cells(f'B{current_row}:D{current_row}')
+
+    # 컬럼 너비 조정
+    worksheet.column_dimensions['A'].width = 25
+    worksheet.column_dimensions['B'].width = 27
+    worksheet.column_dimensions['C'].width = 27
+    worksheet.column_dimensions['D'].width = 26
+    if report_format == '상세 리포트':
+        pass # 상세 리포트의 점수 테이블은 A-D 컬럼을 사용하므로 너비가 적절함
+
+    # 공통 서식 적용
     worksheet['A1'].font = TITLE_FONT
     worksheet['B1'].font = TITLE_FONT
     result_cell = worksheet['B2']
@@ -198,16 +214,24 @@ def write_individual_report_sheet(writer, candidate_name, all_df, report_format)
         result_cell.fill = FAIL_FILL
     result_cell.border = THIN_BORDER
 
+    # 상세 리포트 점수 테이블 서식
     if report_format == '상세 리포트':
         worksheet['A4'].font = HEADER_FONT
         score_table_range = f'A5:D{5 + len(comparison_df)}'
         apply_styles_to_range(worksheet, score_table_range, border=THIN_BORDER)
         apply_styles_to_range(worksheet, f'A5:D5', font=TABLE_HEADER_FONT, fill=TABLE_HEADER_FILL, alignment=CENTER_ALIGN)
 
+    # 코멘트 테이블 서식
     worksheet[f'A{comments_start_row}'].font = HEADER_FONT
-    comment_table_range = f'A{comments_start_row + 1}:B{comments_start_row + 1 + len(comments_df)}'
-    apply_styles_to_range(worksheet, comment_table_range, border=THIN_BORDER)
-    apply_styles_to_range(worksheet, f'A{comments_start_row + 1}:B{comments_start_row + 1}', font=TABLE_HEADER_FONT, fill=TABLE_HEADER_FILL, alignment=CENTER_ALIGN)
+    apply_styles_to_range(worksheet, f'A{header_row}:D{header_row}', font=TABLE_HEADER_FONT, fill=TABLE_HEADER_FILL, border=THIN_BORDER)
+    worksheet[f'A{header_row}'].alignment = CENTER_ALIGN
+    worksheet[f'B{header_row}'].alignment = CENTER_ALIGN
+    
+    for i in range(len(comments_data)):
+        current_row = header_row + 1 + i
+        apply_styles_to_range(worksheet, f'A{current_row}:D{current_row}', border=THIN_BORDER)
+        worksheet[f'A{current_row}'].alignment = CENTER_ALIGN
+        worksheet[f'B{current_row}'].alignment = WRAP_LEFT_ALIGN
 
 
 def generate_report_file_content(candidate_name, all_df, report_format):
