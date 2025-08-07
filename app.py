@@ -221,44 +221,71 @@ def generate_overall_report_file_content(all_df, report_format):
     """전체 후보자에 대한 요약 및 개별 리포트를 포함하는 Excel 파일을 생성합니다."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # 1. 전체 요약 시트 생성
+        # 1. 전체 및 합격자 평균 미리 계산
+        score_cols = list(CATEGORY_COLS.keys()) + ['총점']
+        overall_avg = all_df[score_cols].mean()
+        passer_df_all = all_df[all_df['Reviewer_Result'] == 'Pass']
+        passer_avg = passer_df_all[score_cols].mean() if not passer_df_all.empty else pd.Series(0, index=score_cols)
+
+        # 2. 후보자별 요약 데이터 생성
         summary_data = []
-        candidate_names = all_df['성명'].unique()
+        candidate_names = sorted(all_df['성명'].unique())
         for name in candidate_names:
-            candidate_df = all_df[all_df['성명'] == name]
+            candidate_df = all_df[all_df['성명'] == name].reset_index(drop=True)
             is_final_pass = all(candidate_df['Reviewer_Result'] == 'Pass')
             final_result = "Pass" if is_final_pass else "Fail"
-            avg_scores = candidate_df[list(CATEGORY_COLS.keys()) + ['총점']].mean()
+            
+            # 후보자 개인 평균 점수
+            candidate_avg_scores = candidate_df[score_cols].mean()
+            
             summary_row = {'성명': name, '최종 결과': final_result}
-            summary_row.update(avg_scores)
+            
+            # 후보자 점수, 전체 평균, 합격자 평균을 컬럼으로 추가
+            for col in score_cols:
+                summary_row[f'{col}_후보자'] = candidate_avg_scores[col]
+                summary_row[f'{col}_전체평균'] = overall_avg[col]
+                summary_row[f'{col}_합격자평균'] = passer_avg[col]
+
+            # 심사위원별 코멘트 추가
+            comments = candidate_df['총평'].fillna('코멘트 없음').tolist()
+            for i in range(3):
+                summary_row[f'심사위원{i+1} 코멘트'] = comments[i] if i < len(comments) else 'N/A'
+            
             summary_data.append(summary_row)
         
         summary_df = pd.DataFrame(summary_data)
-        # '전체 요약' 시트를 가장 먼저 생성
+        
+        # 3. '전체 요약' 시트에 데이터 쓰기
         summary_df.to_excel(writer, sheet_name='전체 요약', index=False)
         worksheet = writer.sheets['전체 요약']
-        
-        # 요약 시트 서식 적용
-        worksheet.column_dimensions['A'].width = 15
-        worksheet.column_dimensions['B'].width = 15
-        for col_idx, col_name in enumerate(summary_df.columns[2:], 3):
-             worksheet.column_dimensions[get_column_letter(col_idx)].width = 18
-        
+
+        # 4. 서식 적용
+        # 컬럼 너비 조정
+        for col_idx, col_name in enumerate(summary_df.columns, 1):
+            col_letter = get_column_letter(col_idx)
+            if '코멘트' in col_name:
+                worksheet.column_dimensions[col_letter].width = 40
+            elif '성명' in col_name:
+                 worksheet.column_dimensions[col_letter].width = 15
+            else:
+                 worksheet.column_dimensions[col_letter].width = 18
+
+        # 테이블 전체 서식
         summary_range = f'A1:{get_column_letter(len(summary_df.columns))}{len(summary_df) + 1}'
         apply_styles_to_range(worksheet, summary_range, border=THIN_BORDER)
         apply_styles_to_range(worksheet, f'A1:{get_column_letter(len(summary_df.columns))}1', font=TABLE_HEADER_FONT, fill=TABLE_HEADER_FILL, alignment=CENTER_ALIGN)
         
-        # Pass/Fail 서식
+        # 최종 결과 Pass/Fail 서식
         for row_idx, row in enumerate(summary_df.itertuples(), 2):
             result_cell = worksheet[f'B{row_idx}']
-            if row._2 == "Pass":
+            if row._2 == "Pass": # _2 corresponds to the second column '최종 결과'
                 result_cell.font = PASS_FONT
                 result_cell.fill = PASS_FILL
             else:
                 result_cell.font = FAIL_FONT
                 result_cell.fill = FAIL_FILL
 
-        # 2. 후보자별 개별 리포트 시트 생성
+        # 5. 후보자별 개별 리포트 시트 생성
         for name in candidate_names:
             write_individual_report_sheet(writer, name, all_df, report_format)
             
