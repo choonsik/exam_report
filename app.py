@@ -17,8 +17,8 @@ CATEGORY_COLS = {
 }
 
 PASS_SCORE_THRESHOLD = 70
-# 리포트 양식에 '제출용 양식' 추가
-REPORT_FORMATS = ['상세 리포트', '요약 리포트', '제출용 양식']
+# 리포트 양식에서 '제출용 양식' 삭제
+REPORT_FORMATS = ['상세 리포트', '요약 리포트']
 
 # --- Excel Styling ---
 TITLE_FONT = Font(bold=True, size=14)
@@ -84,75 +84,7 @@ def write_individual_report_sheet(writer, candidate_name, all_df, report_format)
     is_final_pass = all(candidate_df['Reviewer_Result'] == 'Pass')
     final_result = "Pass" if is_final_pass else "Fail"
     
-    # '제출용 양식' 로직
-    if report_format == '제출용 양식':
-        # 데이터프레임을 만들지 않고 빈 시트에 직접 작성
-        pd.DataFrame().to_excel(writer, sheet_name=sheet_name)
-        worksheet = writer.sheets[sheet_name]
-
-        # 데이터 계산
-        candidate_scores = candidate_df[list(CATEGORY_COLS.keys()) + ['총점']].mean()
-        overall_avg = all_df[list(CATEGORY_COLS.keys()) + ['총점']].mean()
-        passer_df = all_df[all_df['Reviewer_Result'] == 'Pass']
-        passer_avg = passer_df[list(CATEGORY_COLS.keys()) + ['총점']].mean() if not passer_df.empty else pd.Series(0, index=candidate_scores.index)
-        
-        comments = candidate_df['총평'].fillna('코멘트 없음').tolist()
-
-        # 셀에 데이터 쓰기
-        worksheet['D1'] = "이름"
-        worksheet['E1'] = candidate_name
-        worksheet['B3'] = "Result"
-        worksheet['C3'] = final_result
-        
-        worksheet['B5'] = "Category"
-        worksheet['C5'] = "Total Average"
-        worksheet['D5'] = "Average of pass applicants"
-        worksheet['E5'] = candidate_name
-
-        score_map = {
-            'B6': 'Project (30)', 'C6': overall_avg['Project'], 'D6': passer_avg['Project'], 'E6': candidate_scores['Project'],
-            'B7': 'SW Architect (60)', 'C7': overall_avg['SW Architect'], 'D7': passer_avg['SW Architect'], 'E7': candidate_scores['SW Architect'],
-            'B8': 'Communication (10)', 'C8': overall_avg['Communication'], 'D8': passer_avg['Communication'], 'E8': candidate_scores['Communication'],
-            'B9': 'Total (100)', 'C9': overall_avg['총점'], 'D9': passer_avg['총점'], 'E9': candidate_scores['총점'],
-        }
-        for cell, value in score_map.items():
-            worksheet[cell] = value
-            if isinstance(value, (int, float)):
-                worksheet[cell].number_format = '0.00'
-
-        for i in range(3):
-            worksheet[f'B{11+i}'] = f'Reviewer{i+1} Comment'
-            worksheet[f'C{11+i}'] = comments[i] if i < len(comments) else "N/A"
-
-        # 서식 적용
-        worksheet.column_dimensions['A'].width = 2
-        worksheet.column_dimensions['B'].width = 25
-        worksheet.column_dimensions['C'].width = 20
-        worksheet.column_dimensions['D'].width = 25
-        worksheet.column_dimensions['E'].width = 20
-        
-        # 셀 병합
-        worksheet.merge_cells('C3:E3')
-        for i in range(11, 14):
-            worksheet.merge_cells(f'C{i}:E{i}')
-
-        # 스타일 적용
-        apply_styles_to_range(worksheet, 'D1', alignment=CENTER_ALIGN)
-        apply_styles_to_range(worksheet, 'E1', alignment=CENTER_ALIGN)
-        apply_styles_to_range(worksheet, 'B5:E9', border=THIN_BORDER)
-        apply_styles_to_range(worksheet, 'B11:E13', border=THIN_BORDER)
-        apply_styles_to_range(worksheet, 'B5:E5', font=TABLE_HEADER_FONT, alignment=CENTER_ALIGN)
-        
-        # C3 셀 서식 적용
-        apply_styles_to_range(worksheet, 'C3', alignment=CENTER_ALIGN, border=THIN_BORDER)
-        if final_result == "Pass":
-            apply_styles_to_range(worksheet, 'C3', font=PASS_FONT, fill=PASS_FILL)
-        else:
-            apply_styles_to_range(worksheet, 'C3', font=FAIL_FONT, fill=FAIL_FILL)
-        
-        return # 제출용 양식은 여기서 종료
-
-    # --- 기존 상세/요약 리포트 로직 ---
+    # --- 상세/요약 리포트 로직 ---
     comments_data = []
     candidate_df = candidate_df.reset_index(drop=True)
     for i, row in candidate_df.iterrows():
